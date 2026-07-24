@@ -28,7 +28,7 @@ typedef enum {
 /* Degradation modes */
 typedef enum {
     DEGRADE_NONE = 0,           /* Normal display */
-    DEGRADE_RETRY,              /* Retry I2C */
+    DEGRADE_RETRY,              /* Retry I2C (reserved for future use) */
     DEGRADE_LED_ONLY,           /* LED indicator only */
     DEGRADE_SILENT              /* Silent mode */
 } DegradeMode_t;

@@ -88,18 +88,26 @@ OLED_Result_t OLED_ShowStringSafe(uint8_t x, uint8_t y, const uint8_t *str,
         return oled_result;
     }
 
-    /* Normal mode or retry mode */
-    for (int retry = 0; retry < OLED_MAX_RETRIES; retry++) {
-        OLED_ShowString(x, y, (uint8_t *)str, size, mode);
+    /* Normal mode: perform the display operation */
+    OLED_ShowString(x, y, (uint8_t *)str, size, mode);
+
+    /* Verify I2C bus is alive after the operation */
+    uint8_t probe_data = 0;
+    oled_result.i2c_status = HAL_I2C_Master_Transmit(&hi2c1, 0x78, &probe_data, 1, OLED_I2C_TIMEOUT_MS);
+
+    if (oled_result.i2c_status == HAL_OK) {
         oled_result.display_ok = true;
+        oled_result.error_count = 0;
         return oled_result;
     }
 
-    /* Retry failed */
+    /* I2C probe failed - operation likely failed */
+    oled_result.display_ok = false;
     oled_result.error_count++;
     if (oled_result.error_count >= OLED_ERROR_THRESHOLD) {
         degrade_mode = DEGRADE_LED_ONLY;
-        OLED_Wrapper_SendDebug("OLED: Too many errors, entering LED_ONLY mode");
+        OLED_Wrapper_SendDebug("OLED_ShowStringSafe: Too many errors, entering LED_ONLY mode");
+        ErrorLog_Add(ERROR_LOG_OLED_FAIL, ERROR_SEVERITY_ERROR, 0);
     }
 
     return oled_result;
@@ -114,7 +122,26 @@ OLED_Result_t OLED_RefreshSafe(void)
     }
 
     OLED_Refresh();
-    oled_result.display_ok = true;
+
+    /* Verify I2C bus is alive after the refresh */
+    uint8_t probe_data = 0;
+    oled_result.i2c_status = HAL_I2C_Master_Transmit(&hi2c1, 0x78, &probe_data, 1, OLED_I2C_TIMEOUT_MS);
+
+    if (oled_result.i2c_status == HAL_OK) {
+        oled_result.display_ok = true;
+        oled_result.error_count = 0;
+        return oled_result;
+    }
+
+    /* I2C probe failed after refresh */
+    oled_result.display_ok = false;
+    oled_result.error_count++;
+    if (oled_result.error_count >= OLED_ERROR_THRESHOLD) {
+        degrade_mode = DEGRADE_LED_ONLY;
+        OLED_Wrapper_SendDebug("OLED_RefreshSafe: Too many errors, entering LED_ONLY mode");
+        ErrorLog_Add(ERROR_LOG_OLED_FAIL, ERROR_SEVERITY_ERROR, 0);
+    }
+
     return oled_result;
 }
 
