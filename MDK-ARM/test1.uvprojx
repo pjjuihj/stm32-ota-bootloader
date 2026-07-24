@@ -424,6 +424,31 @@
               <FileType>1</FileType>
               <FilePath>../tests/test_bootloader_mcu.c</FilePath>
             </File>
+            <File>
+              <FileName>flash_driver.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/flash_driver.c</FilePath>
+            </File>
+            <File>
+              <FileName>error_log.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/error_log.c</FilePath>
+            </File>
+            <File>
+              <FileName>protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>oled_wrapper.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/oled_wrapper.c</FilePath>
+            </File>
+            <File>
+              <FileName>led_indicator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/led_indicator.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
