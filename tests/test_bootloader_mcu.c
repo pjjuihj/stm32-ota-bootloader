@@ -184,6 +184,9 @@ void RunBootloaderTests(void)
     test_partition_sizes();
     test_magic_values();
 
+    /* 清除测试设置的回滚标志，避免复位后卡死 */
+    Bootloader_ClearRollbackFlag();
+
     HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n========================================\r\n", 44, 100);
     char result[64];
     snprintf(result, sizeof(result), "Result: %d/%d passed\r\n", tests_passed, tests_run);
