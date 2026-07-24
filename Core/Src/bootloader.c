@@ -110,13 +110,11 @@ void Bootloader_Init(void)
     HAL_UART_Receive_IT(&huart1, &uart_rx_byte, 1);
 
     /* UART、LED、IWDG 已在 main.c 中初始化 */
+    /* FlashDriver_Init, ErrorLog_Init, Protocol_Init, LED_Indicator_Init
+     * 已在 main.c 中调用，此处不再重复初始化 */
 
-    /* 初始化新模块 */
-    FlashDriver_Init();
-    ErrorLog_Init();
-    Protocol_Init();
+    /* OLED_Wrapper 未在 main.c 中初始化 */
     OLED_Wrapper_Init();
-    LED_Indicator_Init();
 
     /* 检查掉电恢复 */
     if (Bootloader_IsPowerLossRecovery()) {
@@ -819,7 +817,7 @@ void Bootloader_LED_Set(BootState_t state)
 bool Bootloader_IsPowerLossRecovery(void)
 {
     uint32_t ota_state = *(volatile uint32_t *)OTA_STATE_ADDR;
-    return (ota_state == 0x00000002);  // OTA_STATE_WRITING
+    return (ota_state == (uint32_t)OTA_STATE_WRITING);
 }
 
 void Bootloader_HandlePowerLoss(void)
@@ -838,18 +836,39 @@ void Bootloader_HandlePowerLoss(void)
     erase_init.Sector = FLASH_SECTOR_2;
     erase_init.NbSectors = 1;
     erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    HAL_FLASHEx_Erase(&erase_init, &sector_error);
+    if (HAL_FLASHEx_Erase(&erase_init, &sector_error) != HAL_OK) {
+        HAL_FLASH_Lock();
+        __enable_irq();
+        Bootloader_LogError(BOOT_ERR_FLASH_ERASE);
+        Bootloader_SendResponse("ERROR:Power loss recovery erase failed");
+        return;
+    }
 
     /* 重写控制数据 (不清除 OTA 状态，让应用层决定) */
+    bool write_ok = true;
     if (*(volatile uint32_t *)BOOT_CONTROL_MAGIC_ADDR == BOOT_CONTROL_MAGIC) {
-        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, BOOT_CONTROL_MAGIC_ADDR, BOOT_CONTROL_MAGIC);
+        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, BOOT_CONTROL_MAGIC_ADDR, BOOT_CONTROL_MAGIC) != HAL_OK) {
+            write_ok = false;
+        }
     }
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_ACTIVE_ADDR, active);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_CRC_ADDR, crc);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_SIZE_ADDR, size);
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_ACTIVE_ADDR, active) != HAL_OK) {
+        write_ok = false;
+    }
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_CRC_ADDR, crc) != HAL_OK) {
+        write_ok = false;
+    }
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_SIZE_ADDR, size) != HAL_OK) {
+        write_ok = false;
+    }
 
     HAL_FLASH_Lock();
     __enable_irq();
+
+    if (!write_ok) {
+        Bootloader_LogError(BOOT_ERR_FLASH_WRITE);
+        Bootloader_SendResponse("ERROR:Power loss recovery write failed");
+        return;
+    }
 
     Bootloader_SendResponse("Power loss recovery done");
 }

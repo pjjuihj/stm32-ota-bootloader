@@ -321,7 +321,18 @@ typedef enum {
     RECOVERY_MANUAL
 } RecoveryAction_t;
 
-/* 新增：OTA 控制块 (扩展) */
+/* 新增：OTA 状态枚举 */
+typedef enum {
+    OTA_STATE_IDLE = 0,
+    OTA_STATE_ERASING,
+    OTA_STATE_WRITING,
+    OTA_STATE_VERIFYING,
+    OTA_STATE_COMPLETE,
+    OTA_STATE_ERROR,
+    OTA_STATE_ROLLBACK
+} OTA_State_t;
+
+/* 新增：OTA 控制块 (扩展) - 保留用于未来掉电恢复增强 */
 typedef struct {
     uint32_t state;                 // OTA_State_t
     uint32_t received_size;
@@ -336,7 +347,9 @@ typedef struct {
 
 /* 新增：掉电保护地址 */
 #define OTA_STATE_ADDR              0x0800BFD4U
-#define OTA_RECEIVED_SIZE_ADDR      0x0800BFCFU
+/* OTA_RECEIVED_SIZE_ADDR must be 4-byte aligned for uint32_t* access on Cortex-M4.
+ * 0x0800BFC8 is word-aligned and within Sector 2 control data area. */
+#define OTA_RECEIVED_SIZE_ADDR      0x0800BFC8U
 
 /* 新增：恢复策略函数 */
 RecoveryAction_t Bootloader_GetRecoveryAction(BootError_t error, uint8_t retry_count);
