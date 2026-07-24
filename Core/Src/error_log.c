@@ -151,6 +151,7 @@ bool ErrorLog_Clear(void)
     error_log.ram_count = 0;
     error_log.flash_count = 0;
     error_log.total_errors = 0;
+    error_log.fatal_count = 0;
     error_log.needs_flush = false;
 
     /* 擦除 Sector 2 中的日志区域 (需要重写其他控制数据) */
