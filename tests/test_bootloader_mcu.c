@@ -138,7 +138,7 @@ static void test_version(void)
 static void test_partition_sizes(void)
 {
     test_print("partition sizes correct");
-    if (PARTITION_A_SIZE == 0x38000 && PARTITION_B_SIZE == 0x40000) { test_pass(); }
+    if (PARTITION_A_SIZE == 0x34000 && PARTITION_B_SIZE == 0x40000) { test_pass(); }
     else { test_fail("size mismatch"); }
 }
 

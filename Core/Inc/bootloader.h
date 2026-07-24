@@ -20,6 +20,7 @@ extern "C" {
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx_hal.h"
+#include "error_log.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -56,15 +57,7 @@ typedef enum {
     BOOT_ERR_UNKNOWN             /* 未知错误 */
 } BootError_t;
 
-/**
-  * @brief 错误日志记录
-  */
-typedef struct {
-    uint32_t error_code;         /* 错误代码 */
-    uint32_t timestamp;          /* 错误时间 (系统 tick) */
-    uint32_t state;              /* 错误发生时的状态 */
-    uint32_t reserved;           /* 保留 */
-} ErrorLogEntry_t;
+/* ErrorLogEntry_t 定义在 error_log.h 中，避免重复定义 */
 
 /**
   * @brief Bootloader 配置

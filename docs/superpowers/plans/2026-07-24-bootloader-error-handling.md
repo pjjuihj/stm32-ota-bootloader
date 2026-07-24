@@ -34,8 +34,8 @@
 | `Core/Src/protocol.c` | 通信协议实现 |
 | `Core/Inc/oled_wrapper.h` | OLED 封装接口 |
 | `Core/Src/oled_wrapper.c` | OLED 错误处理实现 |
-| `Core/Inc/led指示.h` | LED 指示增强接口 |
-| `Core/Src/led指示.c` | LED 指示实现 |
+| `Core/Inc/led_indicator.h` | LED 指示增强接口 |
+| `Core/Src/led_indicator.c` | LED 指示实现 |
 
 ### 修改文件
 
@@ -1347,18 +1347,18 @@ git commit -m "feat: add OLED wrapper with I2C error handling and degraded mode"
 
 ---
 
-### Task 5.1: 创建 led指示.h 和 led指示.c
+### Task 5.1: 创建 led_indicator.h 和 led_indicator.c
 
 **Files:**
-- Create: `Core/Inc/led指示.h`
-- Create: `Core/Src/led指示.c`
+- Create: `Core/Inc/led_indicator.h`
+- Create: `Core/Src/led_indicator.c`
 
-- [ ] **Step 1: 编写 led指示.h**
+- [ ] **Step 1: 编写 led_indicator.h**
 
 ```c
 /**
   ******************************************************************************
-  * @file           : led指示.h
+  * @file           : led_indicator.h
   * @brief          : LED 指示增强接口
   ******************************************************************************
   */
@@ -1432,17 +1432,17 @@ LED_State_t LED_GetState(void);
 #endif /* __LED指示_H */
 ```
 
-- [ ] **Step 2: 编写 led指示.c**
+- [ ] **Step 2: 编写 led_indicator.c**
 
 ```c
 /**
   ******************************************************************************
-  * @file           : led指示.c
+  * @file           : led_indicator.c
   * @brief          : LED 指示增强实现
   ******************************************************************************
   */
 
-#include "led指示.h"
+#include "led_indicator.h"
 
 /* 静态变量 */
 static LED_State_t current_state = LED_STATE_OFF;
@@ -1563,7 +1563,7 @@ LED_State_t LED_GetState(void)
 - [ ] **Step 4: 提交代码**
 
 ```bash
-git add Core/Inc/led指示.h Core/Src/led指示.c
+git add Core/Inc/led_indicator.h Core/Src/led_indicator.c
 git commit -m "feat: add LED indicator with multiple blink modes"
 ```
 
@@ -1641,7 +1641,7 @@ git commit -m "feat: add recovery strategy definitions to bootloader"
 #include "error_log.h"
 #include "protocol.h"
 #include "oled_wrapper.h"
-#include "led指示.h"
+#include "led_indicator.h"
 ```
 
 - [ ] **Step 2: 修改 Bootloader_Init 函数**
@@ -1769,7 +1769,7 @@ git commit -m "feat: integrate error handling modules into bootloader"
 #include "error_log.h"
 #include "protocol.h"
 #include "oled_wrapper.h"
-#include "led指示.h"
+#include "led_indicator.h"
 ```
 
 - [ ] **Step 2: 在 main 函数中添加新模块初始化**

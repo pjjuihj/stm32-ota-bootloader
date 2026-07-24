@@ -689,12 +689,14 @@ void Bootloader_LogError(BootError_t error)
     /* 计算写入位置 */
     uint32_t log_addr = ERROR_LOG_ADDR + 4 + ((error_count % ERROR_LOG_SIZE) * ERROR_LOG_ENTRY_SIZE);
 
-    /* 写入错误记录 */
+    /* 写入错误记录 (使用 error_log.h 中的 ErrorLogEntry_t) */
     ErrorLogEntry_t entry;
     entry.error_code = error;
     entry.timestamp = HAL_GetTick();
     entry.state = boot_config.state;
-    entry.reserved = 0;
+    entry.severity = ERROR_SEVERITY_ERROR;
+    entry.retry_count = 0;
+    entry.line = 0;
 
     __disable_irq();
     HAL_FLASH_Unlock();
