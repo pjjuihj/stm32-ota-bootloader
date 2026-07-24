@@ -53,7 +53,7 @@ typedef struct {
 
 /* 错误日志配置 */
 #define ERROR_LOG_RAM_SIZE          16      // RAM 缓冲大小
-#define ERROR_LOG_FLASH_SIZE        8       // Flash 保留条目数
+#define ERROR_LOG_FLASH_SIZE        4       // Flash 保留条目数 (entries 0-3, 避免与控制数据地址重叠)
 #define ERROR_LOG_FLUSH_THRESHOLD   5       // 触发刷写的阈值
 
 /* 错误日志管理器 */

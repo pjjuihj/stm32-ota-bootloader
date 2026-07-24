@@ -137,7 +137,7 @@ typedef struct {
 #define APP_SIZE_ADDR           0x0800BFD8U     /* 固件大小 (4字节) */
 #define BOOT_VERSION_ADDR       0x0800BFD0U     /* Bootloader 版本地址 */
 #define ERROR_LOG_ADDR          0x0800BF80U     /* 错误日志起始地址 */
-#define ERROR_LOG_SIZE          8               /* 最近 8 次错误记录 */
+#define ERROR_LOG_SIZE          4               /* 最近 4 次错误记录 (Sector 2 安全范围) */
 #define ERROR_LOG_ENTRY_SIZE    sizeof(ErrorLogEntry_t)  /* 使用 sizeof 保持与 struct 一致 */
 
 /* 超时定义 */

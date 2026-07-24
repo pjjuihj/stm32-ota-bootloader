@@ -679,40 +679,28 @@ bool Bootloader_ShouldRollback(void)
 
 void Bootloader_LogError(BootError_t error)
 {
-    /* 读取当前错误计数 */
-    uint32_t *error_count_addr = (uint32_t *)ERROR_LOG_ADDR;
-    uint32_t error_count = *error_count_addr;
-    if (error_count == 0xFFFFFFFF) {
-        error_count = 0;
+    /* 将 BootError_t 映射到 ErrorCode_t，委托给 ErrorLog_Add() 统一管理 */
+    ErrorCode_t code;
+    ErrorSeverity_t severity = ERROR_SEVERITY_ERROR;
+
+    switch (error) {
+        case BOOT_ERR_FLASH_ERASE:      code = ERROR_LOG_FLASH_ERASE;   break;
+        case BOOT_ERR_FLASH_WRITE:      code = ERROR_LOG_FLASH_WRITE;   break;
+        case BOOT_ERR_CRC_MISMATCH:     code = ERROR_LOG_CRC_MISMATCH;  break;
+        case BOOT_ERR_INVALID_APP:      code = ERROR_LOG_INVALID_APP;   break;
+        case BOOT_ERR_UART_TIMEOUT:     code = ERROR_LOG_UART_TIMEOUT;  break;
+        case BOOT_ERR_UART_OVERFLOW:    code = ERROR_LOG_UART_OVERFLOW; break;
+        case BOOT_ERR_I2C_TIMEOUT:      code = ERROR_LOG_I2C_TIMEOUT;   break;
+        case BOOT_ERR_OLED_FAIL:        code = ERROR_LOG_OLED_FAIL;     break;
+        case BOOT_ERR_POWER_LOW:        code = ERROR_LOG_POWER_LOSS;    severity = ERROR_SEVERITY_FATAL; break;
+        case BOOT_ERR_ROLLBACK_FAILED:  code = ERROR_LOG_UNKNOWN;       severity = ERROR_SEVERITY_FATAL; break;
+        default:                        code = ERROR_LOG_UNKNOWN;       break;
     }
 
-    /* 计算写入位置 */
-    uint32_t log_addr = ERROR_LOG_ADDR + 4 + ((error_count % ERROR_LOG_SIZE) * ERROR_LOG_ENTRY_SIZE);
+    /* 委托给统一的错误日志系统 (RAM 缓冲 + Flash 刷写) */
+    ErrorLog_Add(code, severity, 0);
 
-    /* 写入错误记录 (使用 error_log.h 中的 ErrorLogEntry_t) */
-    ErrorLogEntry_t entry;
-    entry.error_code = error;
-    entry.timestamp = HAL_GetTick();
-    entry.state = boot_config.state;
-    entry.severity = ERROR_SEVERITY_ERROR;
-    entry.retry_count = 0;
-    entry.line = 0;
-
-    __disable_irq();
-    HAL_FLASH_Unlock();
-
-    uint32_t *entry_words = (uint32_t *)&entry;
-    for (uint32_t i = 0; i < sizeof(ErrorLogEntry_t) / 4; i++) {
-        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, log_addr + (i * 4), entry_words[i]);
-    }
-
-    /* 更新错误计数 */
-    error_count++;
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, ERROR_LOG_ADDR, error_count);
-
-    HAL_FLASH_Lock();
-    __enable_irq();
-
+    /* 更新 Bootloader 本地状态 */
     boot_config.last_error = error;
     boot_config.error_count++;
 }
