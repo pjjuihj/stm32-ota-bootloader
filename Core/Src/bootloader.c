@@ -678,7 +678,9 @@ void Bootloader_LogError(BootError_t error)
     entry.error_code = error;
     entry.timestamp = HAL_GetTick();
     entry.state = boot_config.state;
-    entry.reserved = 0;
+    entry.severity = 0;
+    entry.retry_count = 0;
+    entry.line = 0;
 
     __disable_irq();
     HAL_FLASH_Unlock();
