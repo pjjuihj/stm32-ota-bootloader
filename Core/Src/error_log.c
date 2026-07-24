@@ -24,6 +24,8 @@ static ErrorLogManager_t error_log;
 /* 私有函数声明 */
 static void ErrorLog_SendDebug(const char *msg);
 static bool ErrorLog_WriteFlash(void);
+static void ErrorLog_FillEntry(ErrorLogEntry_t *entry, ErrorCode_t error_code,
+                               ErrorSeverity_t severity, uint16_t line);
 
 /* 初始化 */
 void ErrorLog_Init(void)
@@ -39,33 +41,41 @@ void ErrorLog_Init(void)
     ErrorLog_SendDebug("ErrorLog: Initialized");
 }
 
+/* 填充错误条目 (消除重复代码) */
+static void ErrorLog_FillEntry(ErrorLogEntry_t *entry, ErrorCode_t error_code,
+                               ErrorSeverity_t severity, uint16_t line)
+{
+    entry->error_code = error_code;
+    entry->timestamp = HAL_GetTick();
+    entry->severity = severity;
+    entry->retry_count = 0;
+    entry->line = line;
+}
+
 /* 记录错误 */
 void ErrorLog_Add(ErrorCode_t error_code, ErrorSeverity_t severity, uint16_t line)
 {
     /* 写入 RAM 缓冲 */
     if (error_log.ram_count < ERROR_LOG_RAM_SIZE) {
-        ErrorLogEntry_t *entry = &error_log.ram_buffer[error_log.ram_count];
-        entry->error_code = error_code;
-        entry->timestamp = HAL_GetTick();
-        entry->severity = severity;
-        entry->retry_count = 0;
-        entry->line = line;
+        ErrorLog_FillEntry(&error_log.ram_buffer[error_log.ram_count],
+                           error_code, severity, line);
         error_log.ram_count++;
     } else {
         /* RAM 满，强制刷写 */
         ErrorLog_Flush();
         if (error_log.ram_count < ERROR_LOG_RAM_SIZE) {
-            ErrorLogEntry_t *entry = &error_log.ram_buffer[error_log.ram_count];
-            entry->error_code = error_code;
-            entry->timestamp = HAL_GetTick();
-            entry->severity = severity;
-            entry->retry_count = 0;
-            entry->line = line;
+            ErrorLog_FillEntry(&error_log.ram_buffer[error_log.ram_count],
+                               error_code, severity, line);
             error_log.ram_count++;
         }
     }
 
     error_log.total_errors++;
+
+    /* FATAL 错误计数 (持久化, 不随 Flush 丢失) */
+    if (severity == ERROR_SEVERITY_FATAL) {
+        error_log.fatal_count++;
+    }
 
     /* FATAL 错误立即刷写 */
     if (severity == ERROR_SEVERITY_FATAL) {
@@ -90,10 +100,21 @@ bool ErrorLog_Flush(void)
         return true;
     }
 
+    /* 计算实际可写入的数量 (与 WriteFlash 一致) */
+    uint8_t write_count = (error_log.ram_count > ERROR_LOG_FLASH_SIZE)
+                        ? ERROR_LOG_FLASH_SIZE : error_log.ram_count;
+
     bool result = ErrorLog_WriteFlash();
     if (result) {
-        error_log.flash_count += error_log.ram_count;
-        error_log.ram_count = 0;
+        error_log.flash_count += write_count;
+        /* 移除已写入的条目, 保留未写入的 */
+        uint8_t remaining = error_log.ram_count - write_count;
+        if (remaining > 0) {
+            memmove(error_log.ram_buffer,
+                    &error_log.ram_buffer[write_count],
+                    remaining * sizeof(ErrorLogEntry_t));
+        }
+        error_log.ram_count = remaining;
         error_log.needs_flush = false;
         ErrorLog_SendDebug("ErrorLog: Flush OK");
     } else {
@@ -106,6 +127,10 @@ bool ErrorLog_Flush(void)
 /* 读取最近 N 条错误 */
 uint32_t ErrorLog_Read(ErrorLogEntry_t *entries, uint32_t max_count)
 {
+    if (entries == NULL || max_count == 0) {
+        return 0;
+    }
+
     uint32_t count = 0;
 
     /* 先读 RAM 中的 */
@@ -124,6 +149,7 @@ uint32_t ErrorLog_Read(ErrorLogEntry_t *entries, uint32_t max_count)
 bool ErrorLog_Clear(void)
 {
     error_log.ram_count = 0;
+    error_log.flash_count = 0;
     error_log.total_errors = 0;
     error_log.needs_flush = false;
 
@@ -136,15 +162,12 @@ bool ErrorLog_Clear(void)
 /* 获取错误统计 */
 void ErrorLog_GetStats(uint32_t *total, uint32_t *fatal_count)
 {
-    *total = error_log.total_errors;
-
-    uint32_t fatal = 0;
-    for (uint32_t i = 0; i < error_log.ram_count; i++) {
-        if (error_log.ram_buffer[i].severity == ERROR_SEVERITY_FATAL) {
-            fatal++;
-        }
+    if (total != NULL) {
+        *total = error_log.total_errors;
     }
-    *fatal_count = fatal;
+    if (fatal_count != NULL) {
+        *fatal_count = error_log.fatal_count;
+    }
 }
 
 /* 检查是否需要刷写 */
@@ -159,8 +182,12 @@ static bool ErrorLog_WriteFlash(void)
     /* 使用 Flash 驱动写入 */
     FlashResult_t result;
 
+    /* 限制每次刷写的条目数不超过 Flash 容量 */
+    uint8_t write_count = (error_log.ram_count > ERROR_LOG_FLASH_SIZE)
+                        ? ERROR_LOG_FLASH_SIZE : error_log.ram_count;
+
     /* 写入错误计数 */
-    uint32_t new_count = error_log.flash_count + error_log.ram_count;
+    uint32_t new_count = error_log.flash_count + write_count;
     result = FlashDriver_WriteWord(ERROR_LOG_COUNT_ADDR, new_count);
     if (result.status != HAL_OK) {
         return false;
@@ -168,7 +195,7 @@ static bool ErrorLog_WriteFlash(void)
 
     /* 写入 RAM 中的记录 */
     uint32_t log_addr = ERROR_LOG_DATA_ADDR;
-    for (uint8_t i = 0; i < error_log.ram_count; i++) {
+    for (uint8_t i = 0; i < write_count; i++) {
         result = FlashDriver_WriteBlock(log_addr + (i * sizeof(ErrorLogEntry_t)),
                                         (uint8_t *)&error_log.ram_buffer[i],
                                         sizeof(ErrorLogEntry_t));

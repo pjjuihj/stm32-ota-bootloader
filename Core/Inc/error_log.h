@@ -61,6 +61,7 @@ typedef struct {
     ErrorLogEntry_t ram_buffer[ERROR_LOG_RAM_SIZE];
     uint8_t ram_count;
     uint8_t flash_count;
+    uint32_t fatal_count;
     uint32_t total_errors;
     bool needs_flush;
 } ErrorLogManager_t;
