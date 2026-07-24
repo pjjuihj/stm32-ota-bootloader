@@ -679,30 +679,12 @@ bool Bootloader_ShouldRollback(void)
 
 void Bootloader_LogError(BootError_t error)
 {
-    /* 将 BootError_t 映射到 ErrorCode_t，委托给 ErrorLog_Add() 统一管理 */
-    ErrorCode_t code;
-    ErrorSeverity_t severity = ERROR_SEVERITY_ERROR;
-
-    switch (error) {
-        case BOOT_ERR_FLASH_ERASE:      code = ERROR_LOG_FLASH_ERASE;   break;
-        case BOOT_ERR_FLASH_WRITE:      code = ERROR_LOG_FLASH_WRITE;   break;
-        case BOOT_ERR_CRC_MISMATCH:     code = ERROR_LOG_CRC_MISMATCH;  break;
-        case BOOT_ERR_INVALID_APP:      code = ERROR_LOG_INVALID_APP;   break;
-        case BOOT_ERR_UART_TIMEOUT:     code = ERROR_LOG_UART_TIMEOUT;  break;
-        case BOOT_ERR_UART_OVERFLOW:    code = ERROR_LOG_UART_OVERFLOW; break;
-        case BOOT_ERR_I2C_TIMEOUT:      code = ERROR_LOG_I2C_TIMEOUT;   break;
-        case BOOT_ERR_OLED_FAIL:        code = ERROR_LOG_OLED_FAIL;     break;
-        case BOOT_ERR_POWER_LOW:        code = ERROR_LOG_POWER_LOSS;    severity = ERROR_SEVERITY_FATAL; break;
-        case BOOT_ERR_ROLLBACK_FAILED:  code = ERROR_LOG_UNKNOWN;       severity = ERROR_SEVERITY_FATAL; break;
-        default:                        code = ERROR_LOG_UNKNOWN;       break;
-    }
-
-    /* 委托给统一的错误日志系统 (RAM 缓冲 + Flash 刷写) */
-    ErrorLog_Add(code, severity, 0);
-
     /* 更新 Bootloader 本地状态 */
     boot_config.last_error = error;
     boot_config.error_count++;
+
+    /* 注意: 暂时禁用 ErrorLog_Add 调用，避免启动时写 Flash 导致卡死 */
+    /* TODO: 需要调查为什么 ErrorLog_Add 在启动时会导致问题 */
 }
 
 BootError_t Bootloader_GetLastError(void)
