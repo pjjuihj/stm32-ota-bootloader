@@ -116,12 +116,6 @@ void Bootloader_Init(void)
     /* OLED_Wrapper 未在 main.c 中初始化 */
     OLED_Wrapper_Init();
 
-    /* 检查掉电恢复 */
-    if (Bootloader_IsPowerLossRecovery()) {
-        Bootloader_SendResponse("Power loss detected, recovering...");
-        Bootloader_HandlePowerLoss();
-    }
-
     /* 发送启动信息 */
     Bootloader_SendResponse("=== Bootloader v1.0.0 ===");
     Bootloader_SendResponse("Waiting for command...");
@@ -679,12 +673,41 @@ bool Bootloader_ShouldRollback(void)
 
 void Bootloader_LogError(BootError_t error)
 {
+    /* 读取当前错误计数 */
+    uint32_t *error_count_addr = (uint32_t *)ERROR_LOG_ADDR;
+    uint32_t error_count = *error_count_addr;
+    if (error_count == 0xFFFFFFFF) {
+        error_count = 0;
+    }
+
+    /* 计算写入位置 */
+    uint32_t log_addr = ERROR_LOG_ADDR + 4 + ((error_count % ERROR_LOG_SIZE) * ERROR_LOG_ENTRY_SIZE);
+
+    /* 写入错误记录 */
+    ErrorLogEntry_t entry;
+    entry.error_code = error;
+    entry.timestamp = HAL_GetTick();
+    entry.state = boot_config.state;
+    entry.reserved = 0;
+
+    __disable_irq();
+    HAL_FLASH_Unlock();
+
+    uint32_t *entry_words = (uint32_t *)&entry;
+    for (uint32_t i = 0; i < sizeof(ErrorLogEntry_t) / 4; i++) {
+        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, log_addr + (i * 4), entry_words[i]);
+    }
+
+    /* 更新错误计数 */
+    error_count++;
+    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, ERROR_LOG_ADDR, error_count);
+
+    HAL_FLASH_Lock();
+    __enable_irq();
+
     /* 更新 Bootloader 本地状态 */
     boot_config.last_error = error;
     boot_config.error_count++;
-
-    /* 注意: 暂时禁用 ErrorLog_Add 调用，避免启动时写 Flash 导致卡死 */
-    /* TODO: 需要调查为什么 ErrorLog_Add 在启动时会导致问题 */
 }
 
 BootError_t Bootloader_GetLastError(void)
