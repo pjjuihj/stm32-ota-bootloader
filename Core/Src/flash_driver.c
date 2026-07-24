@@ -46,7 +46,7 @@ FlashResult_t FlashDriver_EraseSector(uint32_t sector, uint32_t nb_sectors)
         if (result.status == HAL_OK) {
             result.level = FLASH_ERR_LVL_WARN;
             result.msg = "Erase OK";
-            char msg[64];
+            char msg[128];
             snprintf(msg, sizeof(msg), "Flash: Erased sector %lu OK", sector);
             FlashDriver_SendDebug(msg);
             return result;
@@ -55,9 +55,9 @@ FlashResult_t FlashDriver_EraseSector(uint32_t sector, uint32_t nb_sectors)
         if (retry < FLASH_MAX_RETRIES) {
             result.level = FLASH_ERR_LVL_ERROR;
             result.msg = "Erase retry";
-            char msg[64];
-            snprintf(msg, sizeof(msg), "Flash: Erase failed, retry %lu/%d",
-                     retry + 1, FLASH_MAX_RETRIES);
+            char msg[128];
+            snprintf(msg, sizeof(msg), "Flash: Erase sector %lu failed (sector_error=%lu), retry %lu/%d",
+                     sector, sector_error, retry + 1, FLASH_MAX_RETRIES);
             FlashDriver_SendDebug(msg);
             HAL_Delay(FLASH_RETRY_DELAY_MS);
         }
@@ -65,7 +65,10 @@ FlashResult_t FlashDriver_EraseSector(uint32_t sector, uint32_t nb_sectors)
 
     result.level = FLASH_ERR_LVL_FATAL;
     result.msg = "Erase failed after retries";
-    FlashDriver_SendDebug("Flash: FATAL - Erase failed after max retries");
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Flash: FATAL - Erase sector %lu failed after max retries (sector_error=%lu)",
+             sector, sector_error);
+    FlashDriver_SendDebug(msg);
     return result;
 }
 
@@ -73,6 +76,17 @@ FlashResult_t FlashDriver_EraseSector(uint32_t sector, uint32_t nb_sectors)
 FlashResult_t FlashDriver_WriteWord(uint32_t addr, uint32_t data)
 {
     FlashResult_t result = {0};
+
+    /* 检查地址对齐 */
+    if (addr % 4 != 0) {
+        result.status = HAL_ERROR;
+        result.level = FLASH_ERR_LVL_FATAL;
+        result.msg = "Address not 4-byte aligned";
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Flash: FATAL - WriteWord addr 0x%08lX not 4-byte aligned", addr);
+        FlashDriver_SendDebug(msg);
+        return result;
+    }
 
     for (uint32_t retry = 0; retry <= FLASH_MAX_RETRIES; retry++) {
         __disable_irq();
@@ -105,7 +119,7 @@ FlashResult_t FlashDriver_WriteWord(uint32_t addr, uint32_t data)
 
     result.level = FLASH_ERR_LVL_FATAL;
     result.msg = "Write failed after retries";
-    char msg[64];
+    char msg[128];
     snprintf(msg, sizeof(msg), "Flash: FATAL - Write 0x%08lX failed", addr);
     FlashDriver_SendDebug(msg);
     return result;
@@ -115,6 +129,18 @@ FlashResult_t FlashDriver_WriteWord(uint32_t addr, uint32_t data)
 FlashResult_t FlashDriver_WriteBlock(uint32_t addr, const uint8_t *data, uint32_t len)
 {
     FlashResult_t result = {0};
+
+    /* 检查地址和长度对齐 */
+    if (addr % 4 != 0 || len % 4 != 0) {
+        result.status = HAL_ERROR;
+        result.level = FLASH_ERR_LVL_FATAL;
+        result.msg = "Address or length not 4-byte aligned";
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Flash: FATAL - WriteBlock addr 0x%08lX len %lu not 4-byte aligned",
+                 addr, len);
+        FlashDriver_SendDebug(msg);
+        return result;
+    }
 
     for (uint32_t i = 0; i < len; i += 4) {
         uint32_t word = 0;
