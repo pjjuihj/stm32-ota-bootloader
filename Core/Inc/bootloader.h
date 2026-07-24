@@ -51,6 +51,8 @@ typedef enum {
     BOOT_ERR_WATCHDOG_RESET,     /* 看门狗复位 */
     BOOT_ERR_POWER_LOW,          /* 电压过低 */
     BOOT_ERR_ROLLBACK_FAILED,    /* 回滚失败 */
+    BOOT_ERR_I2C_TIMEOUT,        /* I2C 超时 */
+    BOOT_ERR_OLED_FAIL,          /* OLED 显示失败 */
     BOOT_ERR_UNKNOWN             /* 未知错误 */
 } BootError_t;
 
@@ -309,6 +311,40 @@ const BootVersion_t* Bootloader_GetVersion(void);
   * @retval None
   */
 void Bootloader_LED_Set(BootState_t state);
+
+/* 新增：错误恢复策略 */
+typedef enum {
+    RECOVERY_NONE = 0,
+    RECOVERY_RETRY,
+    RECOVERY_SKIP,
+    RECOVERY_ROLLBACK,
+    RECOVERY_MANUAL
+} RecoveryAction_t;
+
+/* 新增：OTA 控制块 (扩展) */
+typedef struct {
+    uint32_t state;                 // OTA_State_t
+    uint32_t received_size;
+    uint32_t total_size;
+    uint32_t crc32;
+    uint32_t partition_addr;
+    uint32_t error_count;
+    uint32_t last_error_tick;
+    uint8_t retry_count;
+    uint8_t max_retries;
+} OTA_ControlBlock_t;
+
+/* 新增：掉电保护地址 */
+#define OTA_STATE_ADDR              0x0800BFD4U
+#define OTA_RECEIVED_SIZE_ADDR      0x0800BFCFU
+
+/* 新增：恢复策略函数 */
+RecoveryAction_t Bootloader_GetRecoveryAction(BootError_t error, uint8_t retry_count);
+bool Bootloader_ExecuteRecovery(RecoveryAction_t action);
+
+/* 新增：掉电恢复函数 */
+bool Bootloader_IsPowerLossRecovery(void);
+void Bootloader_HandlePowerLoss(void);
 
 #ifdef __cplusplus
 }
