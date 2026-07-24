@@ -15,11 +15,6 @@
 #include "bootloader.h"
 #include "display_ota.h"
 #include "oled.h"
-#include "flash_driver.h"
-#include "error_log.h"
-#include "protocol.h"
-#include "oled_wrapper.h"
-#include "led_indicator.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,11 +105,6 @@ void Bootloader_Init(void)
     HAL_UART_Receive_IT(&huart1, &uart_rx_byte, 1);
 
     /* UART、LED、IWDG 已在 main.c 中初始化 */
-    /* FlashDriver_Init, ErrorLog_Init, Protocol_Init, LED_Indicator_Init
-     * 已在 main.c 中调用，此处不再重复初始化 */
-
-    /* OLED_Wrapper 未在 main.c 中初始化 */
-    OLED_Wrapper_Init();
 
     /* 发送启动信息 */
     Bootloader_SendResponse("=== Bootloader v1.0.0 ===");
@@ -688,9 +678,7 @@ void Bootloader_LogError(BootError_t error)
     entry.error_code = error;
     entry.timestamp = HAL_GetTick();
     entry.state = boot_config.state;
-    entry.severity = 0;
-    entry.retry_count = 0;
-    entry.line = 0;
+    entry.reserved = 0;
 
     __disable_irq();
     HAL_FLASH_Unlock();
@@ -707,7 +695,6 @@ void Bootloader_LogError(BootError_t error)
     HAL_FLASH_Lock();
     __enable_irq();
 
-    /* 更新 Bootloader 本地状态 */
     boot_config.last_error = error;
     boot_config.error_count++;
 }
@@ -806,104 +793,6 @@ void Bootloader_LED_Set(BootState_t state)
                 HAL_Delay(100);
             }
             break;
-    }
-}
-
-/* 新增：掉电恢复函数 --------------------------------------------------------*/
-
-bool Bootloader_IsPowerLossRecovery(void)
-{
-    uint32_t ota_state = *(volatile uint32_t *)OTA_STATE_ADDR;
-    return (ota_state == (uint32_t)OTA_STATE_WRITING);
-}
-
-void Bootloader_HandlePowerLoss(void)
-{
-    /* 清除 OTA 状态 */
-    uint32_t active = *(volatile uint32_t *)APP_ACTIVE_ADDR;
-    uint32_t crc = *(volatile uint32_t *)APP_CRC_ADDR;
-    uint32_t size = *(volatile uint32_t *)APP_SIZE_ADDR;
-
-    __disable_irq();
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef erase_init;
-    uint32_t sector_error = 0;
-    erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
-    erase_init.Sector = FLASH_SECTOR_2;
-    erase_init.NbSectors = 1;
-    erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    if (HAL_FLASHEx_Erase(&erase_init, &sector_error) != HAL_OK) {
-        HAL_FLASH_Lock();
-        __enable_irq();
-        Bootloader_LogError(BOOT_ERR_FLASH_ERASE);
-        Bootloader_SendResponse("ERROR:Power loss recovery erase failed");
-        return;
-    }
-
-    /* 重写控制数据 (不清除 OTA 状态，让应用层决定) */
-    bool write_ok = true;
-    if (*(volatile uint32_t *)BOOT_CONTROL_MAGIC_ADDR == BOOT_CONTROL_MAGIC) {
-        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, BOOT_CONTROL_MAGIC_ADDR, BOOT_CONTROL_MAGIC) != HAL_OK) {
-            write_ok = false;
-        }
-    }
-    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_ACTIVE_ADDR, active) != HAL_OK) {
-        write_ok = false;
-    }
-    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_CRC_ADDR, crc) != HAL_OK) {
-        write_ok = false;
-    }
-    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP_SIZE_ADDR, size) != HAL_OK) {
-        write_ok = false;
-    }
-
-    HAL_FLASH_Lock();
-    __enable_irq();
-
-    if (!write_ok) {
-        Bootloader_LogError(BOOT_ERR_FLASH_WRITE);
-        Bootloader_SendResponse("ERROR:Power loss recovery write failed");
-        return;
-    }
-
-    Bootloader_SendResponse("Power loss recovery done");
-}
-
-RecoveryAction_t Bootloader_GetRecoveryAction(BootError_t error, uint8_t retry_count)
-{
-    if (retry_count < 3) {
-        return RECOVERY_RETRY;
-    }
-
-    switch (error) {
-        case BOOT_ERR_FLASH_ERASE:
-        case BOOT_ERR_FLASH_WRITE:
-        case BOOT_ERR_CRC_MISMATCH:
-            return RECOVERY_ROLLBACK;
-        case BOOT_ERR_UART_TIMEOUT:
-            return RECOVERY_MANUAL;
-        case BOOT_ERR_I2C_TIMEOUT:
-        case BOOT_ERR_OLED_FAIL:
-            return RECOVERY_NONE;  // 显示错误可忽略
-        default:
-            return RECOVERY_MANUAL;
-    }
-}
-
-bool Bootloader_ExecuteRecovery(RecoveryAction_t action)
-{
-    switch (action) {
-        case RECOVERY_RETRY:
-            return true;  // 由调用者重试
-        case RECOVERY_ROLLBACK:
-            Bootloader_SetRollbackFlag();
-            return true;
-        case RECOVERY_MANUAL:
-            Bootloader_SendResponse("Manual intervention required");
-            return false;
-        default:
-            return true;
     }
 }
 

@@ -25,11 +25,6 @@
 #include "display_ota.h"
 #include "oled.h"
 #include "test_bootloader_mcu.h"
-#include "flash_driver.h"
-#include "error_log.h"
-#include "protocol.h"
-#include "oled_wrapper.h"
-#include "led_indicator.h"
 /* USER CODE END Includes */
 
 /* USER CODE END Includes */
@@ -104,12 +99,6 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
-  /* 初始化新模块 */
-  FlashDriver_Init();
-  ErrorLog_Init();
-  Protocol_Init();
-  LED_Indicator_Init();
 
   /* 配置 PA0 为输入（Boot 按键） */
   GPIO_InitTypeDef GPIO_InitStruct = {0};
