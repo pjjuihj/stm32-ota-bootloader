@@ -184,8 +184,19 @@ void RunBootloaderTests(void)
     test_partition_sizes();
     test_magic_values();
 
-    /* 清除测试设置的回滚标志，避免复位后卡死 */
-    Bootloader_ClearRollbackFlag();
+    /* 恢复 Sector 2 到干净状态，避免复位后卡死 */
+    /* 测试会修改活动分区和回滚标志，需要恢复默认状态 */
+    __disable_irq();
+    HAL_FLASH_Unlock();
+    FLASH_EraseInitTypeDef erase_init_end;
+    uint32_t sector_error_end = 0;
+    erase_init_end.TypeErase = FLASH_TYPEERASE_SECTORS;
+    erase_init_end.Sector = FLASH_SECTOR_2;
+    erase_init_end.NbSectors = 1;
+    erase_init_end.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+    HAL_FLASHEx_Erase(&erase_init_end, &sector_error_end);
+    HAL_FLASH_Lock();
+    __enable_irq();
 
     HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n========================================\r\n", 44, 100);
     char result[64];
