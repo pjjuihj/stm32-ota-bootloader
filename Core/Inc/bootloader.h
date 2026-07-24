@@ -138,7 +138,7 @@ typedef struct {
 #define BOOT_VERSION_ADDR       0x0800BFD0U     /* Bootloader 版本地址 */
 #define ERROR_LOG_ADDR          0x0800BF80U     /* 错误日志起始地址 */
 #define ERROR_LOG_SIZE          8               /* 最近 8 次错误记录 */
-#define ERROR_LOG_ENTRY_SIZE    16              /* 每条记录 16 字节 */
+#define ERROR_LOG_ENTRY_SIZE    sizeof(ErrorLogEntry_t)  /* 使用 sizeof 保持与 struct 一致 */
 
 /* 超时定义 */
 #define BOOT_TIMEOUT_MS         5000            /* 等待命令超时 (5秒) */
