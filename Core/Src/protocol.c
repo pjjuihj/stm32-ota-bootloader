@@ -6,7 +6,6 @@
   */
 
 #include "protocol.h"
-#include <stdio.h>
 #include <string.h>
 
 /* 外部变量 */
@@ -68,31 +67,34 @@ bool Protocol_SendPacket(ProtocolCmd_t cmd, const uint8_t *data, uint16_t len)
         return false;
     }
 
-    /* 构造包头 */
-    ProtocolPacket_t packet;
-    packet.seq = proto_state.expected_seq;
-    packet.cmd = (uint8_t)cmd;
-    packet.len = len;
+    /* 使用固定大小的包头结构，避免灵活数组成员的未定义行为 */
+    ProtocolHeader_t header;
+    header.seq = proto_state.expected_seq;
+    header.cmd = (uint8_t)cmd;
+    header.len = len;
 
     /* 计算 CRC (不含 crc32 字段本身) */
     uint8_t header_for_crc[6] = {
-        packet.seq,
-        packet.cmd,
+        header.seq,
+        header.cmd,
         (uint8_t)(len & 0xFF),
         (uint8_t)(len >> 8)
     };
-    packet.crc32 = Protocol_CalcCRC32(header_for_crc, 6);
+    header.crc32 = Protocol_CalcCRC32(header_for_crc, 6);
     if (data && len > 0) {
-        packet.crc32 = Protocol_CalcCRC32(data, len) ^ packet.crc32;
+        header.crc32 = Protocol_CalcCRC32(data, len) ^ header.crc32;
     }
 
     /* 发送包头 */
-    HAL_UART_Transmit(&huart1, (uint8_t *)&packet, PROTO_PACKET_HEADER_SIZE, 100);
+    HAL_UART_Transmit(&huart1, (uint8_t *)&header, PROTO_PACKET_HEADER_SIZE, 100);
 
     /* 发送数据 */
     if (data && len > 0) {
         HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 100);
     }
+
+    /* 更新最后活动时间 */
+    proto_state.last_activity_tick = HAL_GetTick();
 
     return true;
 }
@@ -103,6 +105,7 @@ int16_t Protocol_WaitResponse(uint32_t timeout_ms)
     uint32_t start = HAL_GetTick();
     uint8_t buffer[PROTO_PACKET_HEADER_SIZE + PROTO_MAX_DATA_SIZE];
     uint16_t index = 0;
+    bool len_validated = false;
 
     while ((HAL_GetTick() - start) < timeout_ms) {
         /* 尝试接收 */
@@ -111,11 +114,23 @@ int16_t Protocol_WaitResponse(uint32_t timeout_ms)
             buffer[index++] = byte;
 
             /* 检查是否收到完整包头 */
-            if (index >= PROTO_PACKET_HEADER_SIZE) {
+            if (index >= PROTO_PACKET_HEADER_SIZE && !len_validated) {
                 ProtocolPacket_t *pkt = (ProtocolPacket_t *)buffer;
 
-                /* 检查数据长度 */
+                /* 验证数据长度，防止缓冲区溢出 */
+                if (pkt->len > PROTO_MAX_DATA_SIZE) {
+                    return -1;  // 长度非法，丢弃
+                }
+                len_validated = true;
+            }
+
+            if (len_validated) {
+                ProtocolPacket_t *pkt = (ProtocolPacket_t *)buffer;
+
+                /* 检查是否收到完整数据包 */
                 if (index >= PROTO_PACKET_HEADER_SIZE + pkt->len) {
+                    /* 更新最后活动时间 */
+                    proto_state.last_activity_tick = HAL_GetTick();
                     /* 收到完整包，返回命令 */
                     return pkt->cmd;
                 }
@@ -124,6 +139,32 @@ int16_t Protocol_WaitResponse(uint32_t timeout_ms)
     }
 
     return -1;  // 超时
+}
+
+/* 发送数据包 (带重试机制) */
+bool Protocol_SendWithRetry(ProtocolCmd_t cmd, const uint8_t *data, uint16_t len)
+{
+    for (uint8_t retry = 0; retry <= PROTO_MAX_RETRIES; retry++) {
+        /* 发送数据包 */
+        if (!Protocol_SendPacket(cmd, data, len)) {
+            continue;  // 发送失败，重试
+        }
+
+        /* 等待 ACK 响应 */
+        int16_t resp = Protocol_WaitResponse(PROTO_ACK_TIMEOUT_MS);
+
+        if (resp == (int16_t)PROTO_CMD_ACK) {
+            /* 收到 ACK，发送成功 */
+            proto_state.retry_count = 0;
+            return true;
+        }
+
+        /* NACK 或超时，继续重试 */
+        proto_state.retry_count = retry + 1;
+    }
+
+    /* 所有重试均失败 */
+    return false;
 }
 
 /* 检查超时 */

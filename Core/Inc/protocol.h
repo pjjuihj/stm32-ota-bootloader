@@ -39,12 +39,20 @@ typedef enum {
     PROTO_NACK_BUFFER_FULL     // 缓冲区满
 } ProtocolNackReason_t;
 
-/* 数据包结构 */
+/* 包头结构 (不含灵活数组成员，用于局部变量) */
 typedef struct __attribute__((packed)) {
     uint8_t seq;                // 序列号 (0-255 循环)
     uint8_t cmd;                // 命令类型 (ProtocolCmd_t)
     uint16_t len;               // 数据长度
     uint32_t crc32;             // 包头+CRC (从 seq 到 data)
+} ProtocolHeader_t;
+
+/* 数据包结构 (含灵活数组成员，仅用于指针类型转换) */
+typedef struct __attribute__((packed)) {
+    uint8_t seq;
+    uint8_t cmd;
+    uint16_t len;
+    uint32_t crc32;
     uint8_t data[];             // 数据 payload
 } ProtocolPacket_t;
 
@@ -109,6 +117,15 @@ bool Protocol_SendPacket(ProtocolCmd_t cmd, const uint8_t *data, uint16_t len);
   * @retval 收到的命令类型, 超时返回 -1
   */
 int16_t Protocol_WaitResponse(uint32_t timeout_ms);
+
+/**
+  * @brief  发送数据包 (带重试机制)
+  * @param  cmd: 命令类型
+  * @param  data: 数据指针
+  * @param  len: 数据长度
+  * @retval true=成功, false=所有重试均失败
+  */
+bool Protocol_SendWithRetry(ProtocolCmd_t cmd, const uint8_t *data, uint16_t len);
 
 /**
   * @brief  检查超时
