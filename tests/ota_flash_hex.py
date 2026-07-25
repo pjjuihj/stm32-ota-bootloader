@@ -81,10 +81,10 @@ class OTAFlasher:
             )
             time.sleep(0.5)
             self.ser.reset_input_buffer()
-            print(f"✅ 已连接到 {self.port}")
+            print(f"[OK] 已连接到 {self.port}")
             return True
         except serial.SerialException as e:
-            print(f"❌ 连接失败: {e}")
+            print(f"[FAIL] 连接失败: {e}")
             return False
 
     def disconnect(self):
@@ -121,18 +121,18 @@ class OTAFlasher:
                 print(f"  解析 Intel HEX 文件...")
                 firmware = IntelHexParser.load(self.firmware_path)
                 if firmware is None:
-                    print(f"❌ 解析 HEX 文件失败")
+                    print(f"[FAIL] 解析 HEX 文件失败")
                     return False
             else:
                 with open(self.firmware_path, 'rb') as f:
                     firmware = f.read()
-            print(f"✅ 固件文件: {self.firmware_path}")
+            print(f"[OK] 固件文件: {self.firmware_path}")
             print(f"   大小: {len(firmware)} 字节")
         except FileNotFoundError:
-            print(f"❌ 找不到固件文件: {self.firmware_path}")
+            print(f"[FAIL] 找不到固件文件: {self.firmware_path}")
             return False
         except Exception as e:
-            print(f"❌ 读取固件失败: {e}")
+            print(f"[FAIL] 读取固件失败: {e}")
             return False
 
         # 连接串口
@@ -145,23 +145,22 @@ class OTAFlasher:
             response = self.send_command("ota_enter")
             print(f"  收到: {response}")
             if not any("Boot mode set" in r for r in response):
-                print("❌ 进入 Boot 模式失败")
+                print("[FAIL] 进入 Boot 模式失败")
                 return False
 
-            # 等待用户复位设备
-            print("\n  请复位设备（按下复位按钮或断电重连）...")
-            input("  按 Enter 继续...")
+            # 等待设备复位
+            print("\n  等待设备复位...")
+            time.sleep(3)
 
             # 重新连接
-            time.sleep(1)
             self.ser.reset_input_buffer()
 
             # 步骤2: 开始 OTA
             print(f"\n[2/5] 开始 OTA (大小: {len(firmware)} 字节)...")
-            response = self.send_command(f"ota_start {len(firmware)}")
+            response = self.send_command(f"ota_start {len(firmware)}", wait=5)
             print(f"  收到: {response}")
             if not any("OK:Start" in r for r in response):
-                print("❌ 开始 OTA 失败")
+                print("[FAIL] 开始 OTA 失败")
                 return False
 
             # 步骤3: 发送固件数据
@@ -179,7 +178,7 @@ class OTAFlasher:
 
                 # 检查响应
                 if any("ERROR" in r for r in response):
-                    print(f"\n❌ 发送失败: {response}")
+                    print(f"\n[FAIL] 发送失败: {response}")
                     return False
 
             print()  # 换行
@@ -195,13 +194,13 @@ class OTAFlasher:
 
             if any("OK:Verify passed" in r for r in response):
                 print("\n" + "=" * 60)
-                print("✅ OTA 烧录成功！")
+                print("[OK] OTA 烧录成功！")
                 print("=" * 60)
                 print("设备将在3秒后自动复位...")
                 return True
             else:
                 print("\n" + "=" * 60)
-                print("❌ OTA 烧录失败")
+                print("[FAIL] OTA 烧录失败")
                 print("=" * 60)
                 return False
 

@@ -1,0 +1,29 @@
+# Build outputs
+MDK-ARM/test1/*.o
+MDK-ARM/test1/*.d
+MDK-ARM/test1/*.crf
+MDK-ARM/test1/*.axf
+MDK-ARM/test1/*.hex
+MDK-ARM/test1/*.map
+MDK-ARM/test1/*.htm
+MDK-ARM/test1/*.lnp
+MDK-ARM/test1/*.dep
+MDK-ARM/test1/*.build_log.htm
+MDK-ARM/test1/error_log.*
+MDK-ARM/test1/flash_driver.*
+MDK-ARM/test1/led_indicator.*
+MDK-ARM/test1/oled_wrapper.*
+MDK-ARM/test1/protocol.*
+
+# Keil project files (user specific)
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvoptx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -38,7 +38,7 @@ static uint8_t rx_buffer[4200];  // 2048*2 + 100 余量
 static uint16_t rx_index = 0;
 
 /* UART 中断接收环形缓冲区 */
-#define UART_RX_BUF_SIZE 4096
+#define UART_RX_BUF_SIZE 16384
 static volatile uint8_t uart_rx_buf[UART_RX_BUF_SIZE];
 static volatile uint16_t uart_rx_head = 0;
 static volatile uint16_t uart_rx_tail = 0;
