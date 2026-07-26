@@ -8,6 +8,22 @@
   * UART Bootloader，用于接收固件并写入 Flash
   * 支持完整备份和回滚功能
   *
+  * 功能说明：
+  * 1. 通过 UART 接收固件数据
+  * 2. 解析 HEX 格式并写入 Flash
+  * 3. CRC32 校验确保数据完整性
+  * 4. 支持 A/B 分区切换
+  * 5. 支持回滚机制
+  *
+  * 命令协议：
+  * - ota_enter: 进入 Boot 模式
+  * - ota_start <size>: 开始 OTA 升级
+  * - ota_data <hex>: 发送固件数据
+  * - ota_end <crc>: 结束 OTA 升级
+  * - ota_status: 查看状态
+  * - version: 查看版本
+  * - reset: 复位设备
+  *
   ******************************************************************************
   */
 
@@ -27,24 +43,43 @@
 
 /* Private variables ---------------------------------------------------------*/
 
-/* Bootloader 配置 */
+/**
+ * Bootloader 配置结构体
+ * 存储当前 OTA 状态、固件大小、CRC 等信息
+ */
 static BootConfig_t boot_config;
 
-/* UART 句柄 - 使用 main.c 中的 huart1 */
+/**
+ * UART 句柄 - 使用 main.c 中的 huart1
+ * 配置: 115200 波特率, 8N1
+ */
 extern UART_HandleTypeDef huart1;
 
-/* 接收缓冲区 - 必须大于最大 HEX 命令长度 */
-static uint8_t rx_buffer[4200];  // 2048*2 + 100 余量
+/**
+ * 命令接收缓冲区
+ * 用于存储完整的 UART 命令字符串
+ * 大小: 4200 字节 (足够存储最大的 HEX 命令)
+ * 计算: 128字节数据 * 2(HEX编码) + 命令前缀 + 余量
+ */
+static uint8_t rx_buffer[4200];
 static uint16_t rx_index = 0;
 
-/* UART 中断接收环形缓冲区 */
+/**
+ * UART 中断接收环形缓冲区
+ * 用于在 Flash 写入期间缓存接收到的 UART 数据
+ * 大小: 16384 字节
+ * 作用: 防止 Flash 写入时 UART 数据丢失
+ */
 #define UART_RX_BUF_SIZE 16384
 static volatile uint8_t uart_rx_buf[UART_RX_BUF_SIZE];
-static volatile uint16_t uart_rx_head = 0;
-static volatile uint16_t uart_rx_tail = 0;
-static volatile uint8_t uart_rx_byte;
+static volatile uint16_t uart_rx_head = 0;  // 写入位置
+static volatile uint16_t uart_rx_tail = 0;  // 读取位置
+static volatile uint8_t uart_rx_byte;        // 中断接收缓冲
 
-/* 固件接收缓冲区 */
+/**
+ * 固件数据缓冲区
+ * 用于临时存储解析后的固件数据
+ */
 static uint8_t firmware_chunk[FIRMWARE_CHUNK_SIZE];
 
 /* 版本信息 */
@@ -66,21 +101,36 @@ static void Bootloader_HandleStatus(const char *param);
 static void Bootloader_HandleReset(const char *param);
 static void Bootloader_HandleVersion(const char *param);
 
-/* UART 中断接收回调 */
+/**
+ * @brief  UART 中断接收回调函数
+ * @note   每收到一个字节都会调用此函数
+ *         将数据存入环形缓冲区，供主循环处理
+ */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART1) {
+        /* 计算下一个写入位置 */
         uint16_t next_head = (uart_rx_head + 1) % UART_RX_BUF_SIZE;
+
+        /* 如果缓冲区未满，存入数据 */
         if (next_head != uart_rx_tail) {
             uart_rx_buf[uart_rx_head] = uart_rx_byte;
             uart_rx_head = next_head;
         }
+        /* 继续接收下一个字节 */
         HAL_UART_Receive_IT(&huart1, &uart_rx_byte, 1);
     }
 }
 
-/* 从环形缓冲区读取一个字节 */
+/**
+ * @brief  从环形缓冲区读取一个字节
+ * @retval 读取的字节，如果缓冲区为空返回 -1
+ * @note   非阻塞读取，主循环中调用
+ */
 static inline int16_t uart_rx_read(void) {
+    /* 检查缓冲区是否为空 */
     if (uart_rx_head == uart_rx_tail) return -1;
+
+    /* 读取数据 */
     uint8_t data = uart_rx_buf[uart_rx_tail];
     uart_rx_tail = (uart_rx_tail + 1) % UART_RX_BUF_SIZE;
     return data;
@@ -90,18 +140,25 @@ static inline int16_t uart_rx_read(void) {
 
 /* Exported function implementations -----------------------------------------*/
 
+/**
+ * @brief  初始化 Bootloader
+ * @note   在 main() 中调用，完成以下初始化：
+ *         1. 清零配置结构体
+ *         2. 初始化环形缓冲区
+ *         3. 启动 UART 中断接收
+ */
 void Bootloader_Init(void)
 {
-    /* 初始化配置 */
+    /* 初始化配置结构体 */
     memset(&boot_config, 0, sizeof(BootConfig_t));
-    boot_config.state = BOOT_STATE_IDLE;
-    boot_config.max_retries = 3;
+    boot_config.state = BOOT_STATE_IDLE;      /* 初始状态: 空闲 */
+    boot_config.max_retries = 3;               /* 最大重试次数 */
 
     /* 初始化环形缓冲区 */
     uart_rx_head = 0;
     uart_rx_tail = 0;
 
-    /* 启动 UART 中断接收 */
+    /* 启动 UART 中断接收 - 开始监听串口数据 */
     HAL_UART_Receive_IT(&huart1, &uart_rx_byte, 1);
 
     /* UART、LED、IWDG 已在 main.c 中初始化 */
@@ -111,35 +168,45 @@ void Bootloader_Init(void)
     Bootloader_SendResponse("Waiting for command...");
 }
 
+/**
+ * @brief  Bootloader 主循环
+ * @note   此函数永不返回，持续运行直到跳转到 APP
+ *         主要功能：
+ *         1. 喂狗防止复位
+ *         2. LED 闪烁指示运行状态
+ *         3. 从环形缓冲区读取 UART 数据
+ *         4. 解析并执行命令
+ */
 void Bootloader_Run(void)
 {
     uint32_t timeout_start = HAL_GetTick();
     uint32_t led_toggle_time = HAL_GetTick();
 
     while (1) {
-        /* 喂狗 */
+        /* 喂狗 - 防止看门狗复位 */
         IWDG->KR = 0xAAAA;
 
-        /* LED 闪烁指示 Bootloader 模式 */
+        /* LED 闪烁指示 Bootloader 模式 - 每 500ms 翻转一次 */
         if (HAL_GetTick() - led_toggle_time > 500) {
             HAL_GPIO_TogglePin(BOOT_LED_PORT, BOOT_LED_PIN);
             led_toggle_time = HAL_GetTick();
         }
 
-        /* 从环形缓冲区读取数据 */
+        /* 从环形缓冲区读取 UART 数据 */
         int16_t byte;
         while ((byte = uart_rx_read()) != -1) {
-            timeout_start = HAL_GetTick();
+            timeout_start = HAL_GetTick();  /* 重置超时计时器 */
             boot_config.uart_error_count = 0;
 
+            /* 处理换行符 - 表示一个完整命令 */
             if (byte == '\n' || byte == '\r') {
                 if (rx_index > 0) {
-                    rx_buffer[rx_index] = '\0';
-                    Bootloader_ProcessCommand((char *)rx_buffer);
-                    rx_index = 0;
+                    rx_buffer[rx_index] = '\0';  /* 添加字符串结束符 */
+                    Bootloader_ProcessCommand((char *)rx_buffer);  /* 执行命令 */
+                    rx_index = 0;  /* 重置索引 */
                 }
             } else if (rx_index < sizeof(rx_buffer) - 1) {
-                rx_buffer[rx_index++] = byte;
+                rx_buffer[rx_index++] = byte;  /* 存入缓冲区 */
             } else {
                 /* 缓冲区溢出 */
                 Bootloader_LogError(BOOT_ERR_UART_OVERFLOW);
@@ -322,6 +389,16 @@ bool Bootloader_ShouldEnter(void)
     return false;  // CRC 校验通过，可以跳转
 }
 
+/**
+ * @brief  跳转到 Application
+ * @note   此函数执行以下步骤：
+ *         1. 校验 APP 的栈指针和复位向量
+ *         2. 关闭所有中断和外设
+ *         3. 重置 SysTick
+ *         4. 设置栈指针和跳转地址
+ *         5. 跳转到 APP 执行
+ * @warning 跳转前必须确保 APP 有效，否则会导致系统崩溃
+ */
 void Bootloader_JumpToApp(void)
 {
     typedef void (*pFunction)(void);
@@ -330,6 +407,7 @@ void Bootloader_JumpToApp(void)
     /* 等待 Flash 操作完成 */
     while (FLASH->SR & FLASH_SR_BSY) {}
 
+    /* 获取活动分区地址 */
     uint32_t app_addr = Bootloader_GetActivePartition();
 
     char msg[64];
@@ -341,7 +419,7 @@ void Bootloader_JumpToApp(void)
     if (app_sp < 0x20000000 || app_sp > 0x20020000) {
         Bootloader_SendResponse("ERROR:Invalid SP, stay in bootloader");
         Bootloader_LogError(BOOT_ERR_INVALID_APP);
-        return;  // 跳转失败，留在 Bootloader
+        return;  /* 跳转失败，留在 Bootloader */
     }
 
     /* 校验复位向量是否在 Flash 范围内 */
@@ -349,43 +427,44 @@ void Bootloader_JumpToApp(void)
     if (app_reset < BOOTLOADER_START_ADDR || app_reset > FLASH_END_ADDR) {
         Bootloader_SendResponse("ERROR:Invalid Reset, stay in bootloader");
         Bootloader_LogError(BOOT_ERR_INVALID_APP);
-        return;  // 跳转失败，留在 Bootloader
+        return;  /* 跳转失败，留在 Bootloader */
     }
 
-    /* 关闭中断 */
+    /* 关闭所有中断 - 跳转前必须关闭 */
     __disable_irq();
 
-    /* 关闭看门狗 */
-    /* IWDG 由 LSI 供电，无法关闭，跳转前停止喂狗即可 */
+    /* 关闭看门狗 - IWDG 由 LSI 供电，无法关闭，跳转前停止喂狗即可 */
 
-    /* 关闭 UART */
+    /* 关闭 UART - 释放串口资源 */
     HAL_UART_DeInit(&huart1);
 
-    /* 关闭 I2C (OLED 使用) */
+    /* 关闭 I2C (OLED 使用) - 释放 I2C 资源 */
     HAL_I2C_DeInit(&hi2c1);
 
-    /* 关闭 LED */
+    /* 关闭 LED - 跳转前关闭指示灯 */
     HAL_GPIO_WritePin(BOOT_LED_PORT, BOOT_LED_PIN, GPIO_PIN_SET);
 
-    /* 注意：不要调用 HAL_RCC_DeInit()！
-     * App 的 SystemClock_Config() 会自己配置时钟
-     * HAL_RCC_DeInit() 可能导致 App 无法正确初始化时钟 */
+    /**
+     * 注意：不要调用 HAL_RCC_DeInit()！
+     * 原因：App 的 SystemClock_Config() 会自己配置时钟
+     *       HAL_RCC_DeInit() 可能导致 App 无法正确初始化时钟
+     */
 
     /* 重置 SysTick - App 会重新配置 */
     SysTick->LOAD = 0;
     SysTick->VAL = 0;
     SysTick->CTRL = 0;
 
-    /* 设置主堆栈指针 */
+    /* 设置主堆栈指针 - 从 APP 的向量表读取 */
     __set_MSP(app_sp);
 
-    /* 获取复位向量 */
+    /* 获取复位向量 - 从 APP 的向量表读取 */
     jump_to_app = (pFunction)app_reset;
 
-    /* 重定位中断向量表 */
+    /* 重定位中断向量表 - 指向 APP 的向量表 */
     SCB->VTOR = app_addr;
 
-    /* 跳转到应用 */
+    /* 跳转到应用 - 执行 APP 的复位向量 */
     jump_to_app();
 }
 
@@ -900,15 +979,22 @@ static void Bootloader_HandleStart(const char *param)
     Display_OTA_SetSize(0, size);
 }
 
+/**
+ * @brief  处理 ota_data 命令 - 接收固件数据
+ * @param  param: HEX 格式的固件数据
+ * @note   数据格式: ota_data <hex_string>
+ *         例如: ota_data 6007002029020008...
+ *         每次最多接收 128 字节数据
+ */
 static void Bootloader_HandleData(const char *param)
 {
-    /* 先检查 NULL */
+    /* 参数检查 */
     if (param == NULL || strlen(param) == 0) {
         Bootloader_SendResponse("ERROR:Missing data");
         return;
     }
 
-    /* 跳过前导空格 - 使用局部变量 */
+    /* 跳过前导空格 */
     const char *hex_start = param;
     while (*hex_start == ' ') hex_start++;
 
@@ -918,6 +1004,7 @@ static void Bootloader_HandleData(const char *param)
         return;
     }
 
+    /* 检查是否处于接收状态 */
     if (boot_config.state != BOOT_STATE_RECEIVING) {
         Bootloader_SendResponse("ERROR:Not in receive mode");
         return;
@@ -932,20 +1019,24 @@ static void Bootloader_HandleData(const char *param)
         return;
     }
 
-    uint32_t data_len = hex_len / 2;
+    uint32_t data_len = hex_len / 2;  /* HEX 字符数 / 2 = 实际字节数 */
 
     /* 使用静态缓冲区，避免栈溢出 */
     static uint8_t data[FIRMWARE_CHUNK_SIZE];
 
+    /* 限制数据长度，防止缓冲区溢出 */
     if (data_len > sizeof(data)) {
         data_len = sizeof(data);
     }
 
+    /* 解析 HEX 字符串为二进制数据 */
+    /* 例如: "6007" -> 0x60, 0x07 */
     const char *hex = hex_start;
     for (uint32_t i = 0; i < data_len; i++) {
-        uint8_t high = hex[i * 2];
-        uint8_t low = hex[i * 2 + 1];
+        uint8_t high = hex[i * 2];      /* 高位字符 */
+        uint8_t low = hex[i * 2 + 1];   /* 低位字符 */
 
+        /* 解析高位字符 */
         if (high >= '0' && high <= '9') high -= '0';
         else if (high >= 'a' && high <= 'f') high = high - 'a' + 10;
         else if (high >= 'A' && high <= 'F') high = high - 'A' + 10;
@@ -954,6 +1045,7 @@ static void Bootloader_HandleData(const char *param)
             return;
         }
 
+        /* 解析低位字符 */
         if (low >= '0' && low <= '9') low -= '0';
         else if (low >= 'a' && low <= 'f') low = low - 'a' + 10;
         else if (low >= 'A' && low <= 'F') low = low - 'A' + 10;
@@ -962,10 +1054,10 @@ static void Bootloader_HandleData(const char *param)
             return;
         }
 
-        data[i] = (high << 4) | low;
+        data[i] = (high << 4) | low;  /* 合并高低位: 0x60 | 0x07 = 0x67 */
     }
 
-    /* 写入 Flash */
+    /* 写入 Flash - 从当前偏移地址开始 */
     if (Bootloader_WriteFirmware(boot_config.received_size, data, data_len) != HAL_OK) {
         Bootloader_SendResponse("ERROR:Write failed");
         boot_config.state = BOOT_STATE_ERROR;
@@ -973,9 +1065,10 @@ static void Bootloader_HandleData(const char *param)
         return;
     }
 
+    /* 更新已接收大小 */
     boot_config.received_size += data_len;
 
-    /* 发送进度 */
+    /* 发送进度信息 */
     Bootloader_SendProgress(boot_config.received_size, boot_config.app_size);
 
     /* 更新 OLED 进度条 */
