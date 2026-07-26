@@ -8,6 +8,18 @@
   * UART Bootloader，用于接收固件并写入 Flash
   * 支持完整备份和回滚功能
   *
+  * 功能概述：
+  * 1. 通过 UART 接收固件数据（HEX 格式）
+  * 2. 解析并写入 Flash（支持 A/B 分区）
+  * 3. CRC32 校验确保数据完整性
+  * 4. 支持回滚机制（OTA 失败可恢复）
+  * 5. OLED 显示状态信息
+  *
+  * 使用方法：
+  * 1. 调用 Bootloader_Init() 初始化
+  * 2. 调用 Bootloader_Run() 进入主循环
+  * 3. 通过串口发送命令进行 OTA 升级
+  *
   ******************************************************************************
   */
 
@@ -27,7 +39,11 @@ extern "C" {
 /* Exported types ------------------------------------------------------------*/
 
 /**
-  * @brief Bootloader 状态
+  * @brief Bootloader 状态机
+  * @note  状态转换流程：
+  *        IDLE → RECEIVING → VERIFYING → JUMPING
+  *        任何状态 → ERROR（出错时）
+  *        ERROR → IDLE（错误恢复后）
   */
 typedef enum {
     BOOT_STATE_IDLE = 0,         /* 空闲，等待命令 */
@@ -39,14 +55,15 @@ typedef enum {
 } BootState_t;
 
 /**
-  * @brief 错误代码
+  * @brief 错误代码定义
+  * @note  用于记录和报告 Bootloader 运行过程中的错误
   */
 typedef enum {
     BOOT_ERR_NONE = 0,           /* 无错误 */
     BOOT_ERR_FLASH_ERASE,        /* Flash 擦除失败 */
     BOOT_ERR_FLASH_WRITE,        /* Flash 写入失败 */
     BOOT_ERR_CRC_MISMATCH,       /* CRC 校验失败 */
-    BOOT_ERR_INVALID_APP,        /* App 无效 */
+    BOOT_ERR_INVALID_APP,        /* App 无效（向量表错误） */
     BOOT_ERR_UART_TIMEOUT,       /* UART 超时 */
     BOOT_ERR_UART_OVERFLOW,      /* UART 缓冲区溢出 */
     BOOT_ERR_WATCHDOG_RESET,     /* 看门狗复位 */
@@ -60,30 +77,32 @@ typedef enum {
 /* ErrorLogEntry_t 定义在 error_log.h 中，避免重复定义 */
 
 /**
-  * @brief Bootloader 配置
+  * @brief Bootloader 配置结构体
+  * @note  存储 Bootloader 运行时的所有状态信息
   */
 typedef struct {
     BootState_t state;           /* 当前状态 */
-    uint32_t app_size;           /* 固件大小 */
-    uint32_t received_size;      /* 已接收大小 */
-    uint32_t app_crc;            /* 固件 CRC32 */
-    uint32_t calculated_crc;     /* 计算的 CRC32 */
-    uint8_t retry_count;         /* 重试次数 */
-    uint8_t max_retries;         /* 最大重试次数 */
-    uint32_t error_count;        /* 错误计数 */
+    uint32_t app_size;           /* 固件总大小（字节） */
+    uint32_t received_size;      /* 已接收大小（字节） */
+    uint32_t app_crc;            /* 固件 CRC32 值 */
+    uint32_t calculated_crc;     /* 实际计算的 CRC32 */
+    uint8_t retry_count;         /* 当前重试次数 */
+    uint8_t max_retries;         /* 最大重试次数（默认3） */
+    uint32_t error_count;        /* 累计错误计数 */
     uint32_t uart_error_count;   /* UART 错误计数 */
-    BootError_t last_error;      /* 最后错误 */
+    BootError_t last_error;      /* 最后一次错误代码 */
 } BootConfig_t;
 
 /**
   * @brief Bootloader 版本信息
+  * @note  用于版本查询和兼容性检查
   */
 typedef struct {
-    uint8_t major;               /* 主版本号 */
-    uint8_t minor;               /* 次版本号 */
-    uint8_t patch;               /* 补丁号 */
-    uint8_t reserved;            /* 保留 */
-    uint32_t build_date;         /* 构建日期 */
+    uint8_t major;               /* 主版本号 (如 1.0.0 中的 1) */
+    uint8_t minor;               /* 次版本号 (如 1.0.0 中的 0) */
+    uint8_t patch;               /* 补丁号 (如 1.0.0 中的 0) */
+    uint8_t reserved;            /* 保留字段 */
+    uint32_t build_date;         /* 构建日期 (格式: 0xYYYYMMDD) */
     uint32_t crc;                /* 版本信息 CRC */
 } BootVersion_t;
 
@@ -101,7 +120,14 @@ typedef struct {
  * └──────────────────────┴────────────────┘
  */
 
-/* Flash 地址定义 */
+/**
+ * Flash 地址定义
+ * STM32F407VETx Flash 布局 (512KB):
+ * Sector 0-1: Bootloader (32KB)
+ * Sector 2: 控制数据 (16KB)
+ * Sector 3-5: Partition A (208KB)
+ * Sector 6-7: Partition B (256KB)
+ */
 #define BOOTLOADER_START_ADDR   0x08000000U     /* Bootloader 起始地址 */
 #define BOOTLOADER_SIZE         0x8000U         /* Bootloader 大小 (32KB) */
 
@@ -164,24 +190,41 @@ typedef struct {
 
 /**
   * @brief  初始化 Bootloader
+  * @note   在 main() 中调用，完成以下初始化：
+  *         1. 清零配置结构体
+  *         2. 初始化环形缓冲区
+  *         3. 启动 UART 中断接收
   * @retval None
   */
 void Bootloader_Init(void);
 
 /**
   * @brief  运行 Bootloader 主循环
+  * @note   此函数永不返回，持续运行直到跳转到 APP
+  *         主要功能：
+  *         1. 喂狗防止复位
+  *         2. LED 闪烁指示运行状态
+  *         3. 从环形缓冲区读取 UART 数据
+  *         4. 解析并执行命令
   * @retval None
   */
 void Bootloader_Run(void);
 
 /**
   * @brief  检查是否应该进入 Bootloader
+  * @note   检查以下条件：
+  *         1. Boot 魔数是否设置
+  *         2. 回滚标志是否设置
+  *         3. APP 向量表是否有效
+  *         4. APP CRC 是否匹配
   * @retval true=进入 Bootloader, false=跳转到 App
   */
 bool Bootloader_ShouldEnter(void);
 
 /**
   * @brief  跳转到 Application
+  * @note   跳转前会校验 APP 有效性，关闭所有中断和外设
+  * @warning 跳转后无法返回，必须确保 APP 有效
   * @retval None
   */
 void Bootloader_JumpToApp(void);

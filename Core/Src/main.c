@@ -100,28 +100,39 @@ int main(void)
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
-  /* 配置 PA0 为输入（Boot 按键） */
+  /**
+   * 配置 PA0 为输入（Boot 按键）
+   * 电路：按下接 VCC (3.3V)，松开接地
+   * 配置：下拉输入，按下为高电平
+   */
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   GPIO_InitStruct.Pin = GPIO_PIN_0;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;  /* 下拉，按下为高电平 */
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* 初始化 OLED - 启动时立即显示 */
+  /* 初始化 OLED - 启动时立即显示启动画面 */
   OLED_Init();
   OLED_Clear();
   OLED_Refresh();
 
-  /* 显示启动画面 */
+  /* 显示启动画面 - 用户可以看到 Bootloader 正在启动 */
   OLED_ShowString(20, 0, (uint8_t *)"=== Bootloader ===", 8, 1);
   OLED_ShowString(10, 2, (uint8_t *)"Checking firmware...", 8, 1);
   OLED_Refresh();
   HAL_Delay(500);
 
-  /* 初始化 Bootloader */
+  /* 初始化 Bootloader - 设置状态、缓冲区、启动 UART 接收 */
   Bootloader_Init();
 
-  /* 检查 PA0 按键 - 按下（高电平）进入 Boot 模式 */
+  /**
+   * 检查 PA0 按键 - 按下（高电平）进入 Boot 模式
+   * 流程：
+   * 1. 检测 PA0 是否为高电平
+   * 2. 等待按键释放
+   * 3. 初始化 OTA 显示
+   * 4. 进入 Bootloader 主循环
+   */
   if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET) {
       /* 按键按下，等待释放 */
       OLED_ShowString(0, 4, (uint8_t *)"Button pressed!", 8, 1);
@@ -138,10 +149,16 @@ int main(void)
       Display_OTA_SetState(OTA_DISP_RECEIVING);
 
       Bootloader_SendResponse("Entering bootloader mode (button)...");
-      Bootloader_Run();
+      Bootloader_Run();  /* 进入主循环，永不返回 */
   }
 
-  /* 检查是否应该进入 Bootloader */
+  /**
+   * 检查是否应该进入 Bootloader
+   * 条件：
+   * 1. Boot 魔数已设置（APP 发送 ota_enter 命令）
+   * 2. 回滚标志已设置（OTA 失败需要恢复）
+   * 3. APP 无效（向量表错误、CRC 不匹配）
+   */
   if (Bootloader_ShouldEnter()) {
       /* 检查回滚标志 */
       if (Bootloader_ShouldRollback()) {
@@ -154,7 +171,7 @@ int main(void)
           Bootloader_ClearRollbackFlag();
           Bootloader_SendResponse("Rollback done, resetting...");
           HAL_Delay(100);
-          NVIC_SystemReset();
+          NVIC_SystemReset();  /* 复位后会重新运行 Bootloader */
       }
 
       /* 进入 Bootloader 模式 - 显示 OTA 界面 */
@@ -163,17 +180,20 @@ int main(void)
       Display_OTA_SetState(OTA_DISP_RECEIVING);
 
       Bootloader_SendResponse("Entering bootloader mode...");
-      Bootloader_Run();
+      Bootloader_Run();  /* 进入主循环，等待 OTA 命令 */
   } else {
-      /* 跳转到 Application */
+      /**
+       * 跳转到 Application
+       * 条件：没有 Boot 魔数，没有回滚标志，APP 有效
+       */
       OLED_ShowString(0, 4, (uint8_t *)"Jumping to app...", 8, 1);
       OLED_Refresh();
       HAL_Delay(200);
 
       Bootloader_SendResponse("No boot flag, jumping to app...");
-      Bootloader_JumpToApp();
+      Bootloader_JumpToApp();  /* 跳转到 APP，永不返回 */
 
-      /* 如果跳转失败，进入错误状态 */
+      /* 如果跳转失败（APP 无效），进入错误状态 */
       OLED_Clear();
       OLED_ShowString(20, 0, (uint8_t *)"=== ERROR ===", 8, 1);
       OLED_ShowString(0, 3, (uint8_t *)"Jump failed!", 8, 1);
@@ -182,7 +202,7 @@ int main(void)
 
       Bootloader_SendResponse("ERROR:Jump failed, staying in bootloader");
       while (1) {
-          HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);
+          HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);  /* 快速闪烁 */
           IWDG->KR = 0xAAAA;
           HAL_Delay(100);
       }
